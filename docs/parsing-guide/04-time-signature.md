@@ -32,50 +32,54 @@ Time signature changes during the song are stored as **6-byte events** in patter
 
 ### Event Format
 
-Time signature changes use a **6-byte event** with specific markers:
+Time signature changes use **paired 6-byte events** (12 bytes total):
 
+**First Event** (`0x37 0x70`):
 ```
-Byte 0: 0xB7 (TS change marker)
+Byte 0: 0x37 (TS change start marker)
 Byte 1: 0x70 (Meta event type)
-Byte 2-3: Lookup key (16-bit big-endian)
+Byte 2-3: Lookup key (16-bit big-endian, for Notator internal use)
+Byte 4: Velocity (contains TS numerator: numerator = (velocity - 1) / 2)
+Byte 5: Reserved/padding
+```
+
+**Second Event** (`0xB7 0x70`):
+```
+Byte 0: 0xB7 (TS change end marker)
+Byte 1: 0x70 (Meta event type)
+Byte 2-3: Lookup key (same as first event)
 Byte 4: Flag (0x00 = valid, 0xFF = ignore)
 Byte 5: Measure number - 1 (0-based)
 ```
 
-### Event Structure
+**Critical**: Always check byte 4 in the second event (`0xB7 0x70`). If byte 4 = `0xFF`, this pair must be ignored (it is an end marker or invalid change).
+
+### Paired Events Structure
+
+Time signature changes are stored as **paired 6-byte events**:
+
+1. **Start marker**: `0x37 0x70` (first event)
+2. **End marker**: `0xB7 0x70` (second event, 6 bytes after first)
+
+Both events contain the same lookup key and measure number. The **velocity byte (byte 4) in the `0x37 0x70` event** contains the actual time signature numerator.
+
+### Dynamic Decoding Algorithm
+
+Time signature is decoded **algorithmically** from the velocity byte in the `0x37 0x70` event:
 
 ```
-B7 70 [KEY_HI] [KEY_LO] [FLAG] [MEASURE-1]
- ↑  ↑     ↑        ↑       ↑        ↑
- │  │     └────────┴─ 16-bit lookup key
- │  └─ Meta event marker
- └─ TS change marker
+numerator = (velocity - 1) / 2
+denominator = 4  // Notator always uses /4
 ```
 
-**Critical**: Always check byte 4. If byte 4 = `0xFF`, this event must be ignored (it is an end marker or invalid change).
+**Examples**:
+- Velocity = `7` → numerator = `(7-1)/2 = 3` → **3/4**
+- Velocity = `5` → numerator = `(5-1)/2 = 2` → **2/4**
+- Velocity = `9` → numerator = `(9-1)/2 = 4` → **4/4**
+- Velocity = `11` → numerator = `(11-1)/2 = 5` → **5/4**
+- Velocity = `13` → numerator = `(13-1)/2 = 6` → **6/4**
 
-### Lookup Key
-
-The 16-bit key (bytes 2-3) maps to a time signature via lookup table:
-
-| Key (hex) | Numerator | Denominator | Verified |
-|-----------|-----------|-------------|----------|
-| 0x2100    | 5         | 4           | Yes      |
-| 0x2280    | 3         | 4           | Yes      |
-| 0x2400    | 6         | 8           | Yes      |
-| 0x24C0    | 4         | 4           | Yes      |
-| 0x2580    | 4         | 4           | Yes      |
-| 0x2700    | 2         | 4           | Yes      |
-| 0x2B80    | 4         | 4           | Yes      |
-| 0x2DC0    | 5         | 4           | Yes      |
-| 0x3C00    | 4         | 4           | Yes      |
-| 0x9300    | 2         | 4           | Yes      |
-| 0xD200    | 4         | 4           | Yes      |
-
-**Total**: 11 keys decoded and verified
-
-**Special Case**:
-- Key `0x0000` with byte 4 = `0xFF` → End marker (ignore this event, not present in MIDI exports)
+**Note**: The 16-bit lookup key (bytes 2-3) is used by Notator for internal identification but is **not needed for parsing** - the velocity byte contains the actual TS data.
 
 ### Flag Byte (Byte 4)
 
@@ -98,66 +102,86 @@ The 16-bit key (bytes 2-3) maps to a time signature via lookup table:
 
 ### Critical: Byte 4 Flag Check
 
-**Always check byte 4 before processing a TS change event:**
+**Always check byte 4 in the `0xB7 0x70` event before processing:**
 
 - **Byte 4 = `0x00`**: Valid time signature change - process normally
 - **Byte 4 = `0xFF`**: Invalid/end marker - **ignore this event**
 
 Events with byte 4 = `0xFF` are not present in MIDI exports and should be skipped during parsing.
 
-### Paired Events (Optional)
+### Paired Events Parsing
 
-Time signature changes may sometimes appear as **paired events**:
+Time signature changes **always** appear as **paired events**:
 
-1. **Start marker**: `0x37 0x70` (beginning of TS change region)
-2. **End marker**: `0xB7 0x70` (actual TS change)
+1. **First event**: `0x37 0x70` - Contains velocity byte (byte 4) with TS numerator
+2. **Second event**: `0xB7 0x70` - Contains measure number (byte 5) and validation flag (byte 4)
 
-Both events contain the same lookup key and measure number. The start marker (`0x37`) may indicate the beginning of a TS change region, while the end marker (`0xB7`) indicates the actual change. However, parsing should focus on `0xB7 0x70` events with byte 4 = `0x00`.
+**Parsing steps**:
+1. Find `0x37 0x70` event (start marker)
+2. Read velocity from byte 4: `velocity = event[4]`
+3. Calculate numerator: `numerator = (velocity - 1) / 2`
+4. Check next event (6 bytes later) is `0xB7 0x70`
+5. Verify byte 4 in `0xB7 0x70` event is `0x00` (not `0xFF`)
+6. Read measure number: `measure = event[11] + 1` (byte 5 of second event)
 
 ## Finding Time Signature Changes
 
 1. **Locate Meta Track**: Find track named "* New *" (or "* Ne")
 2. **Read Pattern Data**: Use pattern pointer from track header
-3. **Scan for Events**: Look for `0xB7 0x70` pattern (bytes 0 and 1)
-4. **Verify Flag**: Check byte 4 - **if `0xFF`, skip this event**
-5. **Extract Key**: Read bytes 2-3 as 16-bit big-endian
-6. **Lookup TS**: Use lookup table to find numerator/denominator
-7. **Get Measure**: Calculate `measure = byte5 + 1`
+3. **Scan for Paired Events**: Look for `0x37 0x70` followed by `0xB7 0x70` (6 bytes later)
+4. **Read Velocity**: From `0x37 0x70` event, read byte 4 (velocity)
+5. **Calculate TS**: `numerator = (velocity - 1) / 2`, `denominator = 4`
+6. **Verify Flag**: Check byte 4 in `0xB7 0x70` event - **if `0xFF`, skip this pair**
+7. **Get Measure**: Read byte 5 from `0xB7 0x70` event: `measure = byte5 + 1`
 
-**Important**: The byte 4 flag check is critical - events with byte 4 = `0xFF` are end markers and should not be processed as time signature changes.
+**Important**: 
+- Always parse paired events together (12 bytes total: two 6-byte events)
+- Skip initialization events where velocity = 0 or byte 4 in second event = `0xFF`
+- The lookup key (bytes 2-3) is not needed for parsing - use velocity algorithm instead
 
 ## Example
 
-**Hex Dump**:
+**Hex Dump** (paired events, 12 bytes total):
 ```
-B7 70 24 00 00 05
+37 70 24 00 0D 00  B7 70 24 00 00 05
 ```
 
 **Parsing**:
-- Byte 0: `0xB7` → TS change marker ✓
-- Byte 1: `0x70` → Meta event ✓
-- Bytes 2-3: `0x2400` → Lookup key
-- Byte 4: `0x00` → Valid (not 0xFF) ✓
-- Byte 5: `0x05` → Measure 6 (5 + 1)
+1. **First event** (`0x37 0x70`):
+   - Byte 0: `0x37` → Start marker ✓
+   - Byte 1: `0x70` → Meta event ✓
+   - Byte 4: `0x0D` → Velocity = 13
+   - Calculate numerator: `(13 - 1) / 2 = 6`
+   - Denominator: `4`
+   - Result: **6/4 time signature**
+
+2. **Second event** (`0xB7 0x70`):
+   - Byte 6: `0xB7` → End marker ✓
+   - Byte 7: `0x70` → Meta event ✓
+   - Byte 10: `0x00` → Valid flag (not 0xFF) ✓
+   - Byte 11: `0x05` → Measure 6 (5 + 1)
 
 **Result**:
-- Key `0x2400` → 6/8 time signature
+- Time signature: **6/4**
 - Change occurs at measure 6
 
-## Lookup Table Implementation Notes
+## Algorithm Implementation Notes
 
-- Keys are 16-bit big-endian values
-- Multiple keys can map to the same time signature (e.g., 4/4 has multiple keys: 0x24C0, 0x2580, 0x2B80, 0x3C00, 0xD200)
-- Unknown keys should default to 4/4 or log a warning
-- The lookup table was reverse-engineered from actual .SON files and verified by comparing with MIDI exports
-- **Correction**: Key `0x2280` maps to 3/4 (not 6/4 as initially documented)
+- **No lookup table needed**: Time signature is calculated algorithmically from velocity byte
+- **Velocity range**: Typically 5-13 (for 2/4 to 6/4 time signatures)
+- **Denominator**: Always 4 (Notator uses /4 as base denominator)
+- **Paired events**: Always parse both `0x37 0x70` and `0xB7 0x70` events together (12 bytes)
+- **Skip conditions**: Ignore pairs where velocity = 0 or byte 4 in second event = `0xFF`
+- The lookup key (bytes 2-3) is generated by Notator for internal identification but is not needed for parsing
 
 ## Notes
 
 - Initial TS is in header, changes are in pattern data
 - TS changes are typically in the "* New *" meta track
-- **Always check byte 4 flag before processing TS change** - if `0xFF`, skip the event
+- **Always parse paired events**: `0x37 0x70` + `0xB7 0x70` (12 bytes total)
+- **Always check byte 4 flag** in `0xB7 0x70` event - if `0xFF`, skip the pair
 - Measure numbers are 1-based in display but 0-based in file (byte 5 = measure - 1)
-- Events with byte 4 = `0xFF` are not present in MIDI exports and should be ignored
-- The lookup table contains 11 verified keys covering common time signatures: 2/4, 3/4, 4/4, 5/4, 6/8
+- Velocity byte (byte 4 in `0x37 0x70` event) contains the actual TS numerator
+- Algorithm: `numerator = (velocity - 1) / 2`, `denominator = 4`
+- Events with byte 4 = `0xFF` in second event are not present in MIDI exports and should be ignored
 
