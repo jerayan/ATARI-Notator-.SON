@@ -11,6 +11,7 @@ This guide provides detailed byte-level information for parsing ATARI Notator .S
 5. [Tempo](05-tempo.md)
 6. [Clefs](06-clefs.md)
 7. [Event Types](07-event-types.md)
+8. [Track Quantization](08-quantization.md)
 
 ## Quick Reference
 
