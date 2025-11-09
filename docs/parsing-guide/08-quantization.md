@@ -29,87 +29,36 @@ Byte 3: YY (track transpose)
 
 ## Dynamic Parsing Algorithm
 
-Quantization is parsed **dynamically** from the byte value using the following algorithm:
+Quantization is stored in Byte 2 (`??`) of the pattern `2c XX ?? YY`. This byte acts as an index into a global table stored in `NOTATOR.PRG` (data section offset `0x00B4`). No dynamic calculation is required: Notator simply looks up the tick resolution in this table. The 11 defined entries are:
 
-```javascript
-function parseQuantize(byteValue) {
-    if (byteValue === 0) {
-        return 8;  // Default quantization
-    } else if (byteValue < 6) {
-        return byteValue * 16;  // For values 1-5
-    } else if (byteValue === 6) {
-        return byteValue * 128;  // Special case: 6 * 128 = 768
-    } else if (byteValue >= 8) {
-        return Math.pow(2, byteValue - 8);  // For values >= 8: 2^(byte-8)
-    }
-    // For byteValue == 7 not defined (not in test data)
-    return 8;  // Fallback to default
-}
-```
+| Byte Value | Quantization (ticks) |
+|------------|----------------------|
+| `0x00`     | 4                    |
+| `0x01`     | 6                    |
+| `0x02`     | 8                    |
+| `0x03`     | 12                   |
+| `0x04`     | 16                   |
+| `0x05`     | 24                   |
+| `0x06`     | 32                   |
+| `0x07`     | 48                   |
+| `0x08`     | 64                   |
+| `0x09`     | 96                   |
+| `0x0A`     | 768                  |
 
-### Alternative Implementation with Bit Shift
 
-```javascript
-function parseQuantize(byteValue) {
-    if (byteValue === 0) {
-        return 8;
-    } else if (byteValue < 6) {
-        return byteValue << 4;  // byte * 16
-    } else if (byteValue === 6) {
-        return byteValue << 7;  // byte * 128
-    } else if (byteValue >= 8) {
-        return 1 << (byteValue - 8);  // 2^(byte-8)
-    }
-    return 8;
-}
-```
+## Using the Value in a Parser
 
-## Test Values
-
-| Track | Byte Value | Calculation | Quantization |
-|-------|------------|-------------|--------------|
-| FLUTE1 | 6 | 6 * 128 | 768 |
-| FLUTE2 | 2 | 2 * 16 | 32 |
-| FLUTE3 | 0 | default | 8 |
-| FLUTE4 | 10 | 2^(10-8) = 2^2 | 4 |
-
-## Implementation in Parser
-
-### Step 1: Find Pattern 2c
-
-```javascript
-// Search for pattern 2c XX ?? YY in track
-// Usually at offset +32 from track start (after boundary + name + header)
-const trackStart = /* track start offset */;
-const searchStart = trackStart + 32;
-const searchEnd = Math.min(trackStart + 100, data.length - 4);
-
-for (let i = searchStart; i < searchEnd; i++) {
-    if (data[i] === 0x2c && i + 3 < data.length) {
-        const quantizeByte = data[i + 2];
-        const quantize = parseQuantize(quantizeByte);
-        // ... use quantization
-        break;
-    }
-}
-```
-
-### Step 2: Apply Algorithm
-
-```javascript
-const quantize = parseQuantize(quantizeByte);
-```
+1. Locate the pattern `2c XX ?? YY` in the track header (typically ~+32 bytes from the track start; the first track may appear slightly later).
+2. Read byte `??`, treat it as an index, and look up the tick value in the table above.
+3. Apply that tick resolution when displaying or quantising the track.
 
 ## Notes
 
-- **No lookup table is needed** - everything is calculated dynamically
-- The algorithm covers all known values from test data
-- For value `byte == 7` not present in test data, fallback to default (8) is used
-- Pattern `2c` may be at different offsets depending on track structure, but usually at +32 bytes
+- The lookup table resides in `NOTATOR.PRG` (data section offset `0x00B4`).
+- `0x0A` (768 ticks) is the default used by factory patterns; the other entries correspond to the Notator quantise menu.
+- Pattern `2c 01 ?? 00` appears in every track boundary; byte `??` is the only per-track quantisation parameter.
 
 ## References
 
-- Test file: `QUANTIZE.SON`
-- Tracks: FLUTE1 (768), FLUTE2 (32), FLUTE3 (8), FLUTE4 (4)
-- Pattern: `2c 01 ?? 00` where `??` contains quantization byte value
-
+- Test files: `QUANTIZE.SON`, `QUANTIZ1.SON`, `QUANTIZ2.SON`, `FL123.SON`.
+- Pattern: `2c 01 ?? 00` where `??` is the quantisation index.

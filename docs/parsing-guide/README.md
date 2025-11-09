@@ -55,3 +55,4 @@ ATARI ST uses **Motorola 68000** processor with **big-endian** byte order. All m
 - Pattern data offsets are stored in track headers as 32-bit pointers
 - Time signature changes occur within pattern data as special events
 
+

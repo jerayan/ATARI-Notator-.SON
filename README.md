@@ -20,6 +20,7 @@ The most comprehensive documentation is in the **parsing-guide** directory:
 - **[Tempo](docs/parsing-guide/05-tempo.md)** - Initial tempo and tempo changes
 - **[Clefs](docs/parsing-guide/06-clefs.md)** - Clef information and changes
 - **[Event Types](docs/parsing-guide/07-event-types.md)** - Complete reference of all event types
+- **[Track Quantization](docs/parsing-guide/08-quantization.md)** - Track quantization lookup table
 
 ### Key Features Documented
 
@@ -29,6 +30,7 @@ The most comprehensive documentation is in the **parsing-guide** directory:
 - ✅ **Time Signature Changes**: Paired events (0x37 0x70 + 0xB7 0x70), algorithmic decoding
 - ✅ **Tempo Changes**: Events in "* New *" track
 - ✅ **Clefs**: Clef change events
+- ✅ **Track Quantization**: Pattern `2c XX ?? YY` lookup table (11 values: 4-768 ticks)
 
 ## Repository Structure
 
@@ -49,6 +51,7 @@ The most comprehensive documentation is in the **parsing-guide** directory:
 │       ├── 05-tempo.md                # Tempo (initial + changes)
 │       ├── 06-clefs.md                # Clef information
 │       └── 07-event-types.md          # All event types reference
+│       └── 08-quantization.md          # Quantization
 ├── examples/                           # Example .SON files (if available)
 └── tools/                             # Analysis tools and scripts
 ```
